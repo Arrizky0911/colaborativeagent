@@ -1,79 +1,63 @@
-"use client"
-
-import { useState } from "react"
-import { ChevronRight } from "lucide-react"
+import React from "react";
+import { Box, Typography, Paper, IconButton } from "@mui/material";
+import { ChevronRight, ExpandMore } from "@mui/icons-material";
 
 export function MindMap({ data, activeNode, onNodeClick }) {
-  const [expandedNodes, setExpandedNodes] = useState(new Set())
-
-  const toggleNode = (nodeId) => {
-    const newExpanded = new Set(expandedNodes)
-    if (newExpanded.has(nodeId)) {
-      newExpanded.delete(nodeId)
-    } else {
-      newExpanded.add(nodeId)
-    }
-    setExpandedNodes(newExpanded)
-  }
-
-  const parseOutline = (outline) => {
-    const lines = outline.split("\n")
-    const nodes = []
-    let currentPath = []
-
-    lines.forEach((line) => {
-      const level = (line.match(/^#+/) || [""])[0].length
-      const title = line.replace(/^#+\s*/, "").trim()
-
-      if (!title) return
-
-      const id = title.toLowerCase().replace(/\s+/g, "-")
-      currentPath = currentPath.slice(0, level - 1)
-      currentPath[level - 1] = id
-
-      nodes.push({
-        id,
-        title,
-        level: level - 1,
-        parentId: level > 1 ? currentPath[level - 2] : null,
-      })
-    })
-
-    return nodes
-  }
+  if (!data?.nodes) return null;
 
   const renderNode = (node) => {
-    const children = data.filter((n) => n.parentId === node.id)
-    const hasChildren = children.length > 0
-    const isExpanded = expandedNodes.has(node.id)
+    const children = data.edges.filter(edge => edge.from === node.id).map(edge => 
+      data.nodes.find(n => n.id === edge.to)
+    ).filter(Boolean);
 
     return (
-      <div key={node.id} style={{ marginLeft: `${node.level * 16}px` }}>
-        <div
-          className={`flex items-center gap-1 py-1 cursor-pointer hover:bg-accent rounded ${
-            activeNode === node.id ? "bg-accent" : ""
-          }`}
-          onClick={() => onNodeClick(node.id)}
+      <Box key={node.id} sx={{ mb: 1 }}>
+        <Paper
+          elevation={activeNode === node.id ? 3 : 1}
+          sx={{
+            p: 1,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            backgroundColor: activeNode === node.id ? '#e3f2fd' : 'white',
+            '&:hover': {
+              backgroundColor: '#f5f5f5',
+              transform: 'translateX(5px)',
+            },
+          }}
+          onClick={() => onNodeClick?.(node.id)}
         >
-          {hasChildren && (
-            <ChevronRight
-              className={`h-4 w-4 shrink-0 transition-transform ${isExpanded ? "rotate-90" : ""}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleNode(node.id)
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {children.length > 0 && (
+              <IconButton size="small" sx={{ mr: 1 }}>
+                {activeNode === node.id ? <ExpandMore /> : <ChevronRight />}
+              </IconButton>
+            )}
+            <Typography
+              variant="body2"
+              sx={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
-            />
-          )}
-          <span className="text-sm">{node.title}</span>
-        </div>
-        {hasChildren && isExpanded && children.map((child) => renderNode(child))}
-      </div>
-    )
-  }
+            >
+              {node.label}
+            </Typography>
+          </Box>
+        </Paper>
+        {activeNode === node.id && children.length > 0 && (
+          <Box sx={{ ml: 3, mt: 1, borderLeft: '1px dashed #ccc' }}>
+            {children.map(child => renderNode(child))}
+          </Box>
+        )}
+      </Box>
+    );
+  };
 
-  const nodes = parseOutline(data)
-  const rootNodes = nodes.filter((node) => node.level === 0)
-
-  return <div className="space-y-2">{rootNodes.map((node) => renderNode(node))}</div>
+  return (
+    <Box sx={{ p: 1 }}>
+      {data.nodes
+        .filter(node => !data.edges.some(edge => edge.to === node.id))
+        .map(renderNode)}
+    </Box>
+  );
 }
-

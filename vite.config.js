@@ -9,5 +9,13 @@ export default defineConfig(({ mode }) => {
       'process.env': env
     },
     plugins: [react()],
+    assetsInclude: ['**/*.otf'],
+    build: {
+      rollupOptions: {
+        output: {
+          assetFileNames: 'assets/[name][extname]'
+        }
+      }
+    }
   }
 })
