@@ -1,16 +1,8 @@
-import { AzureChatOpenAI, AzureOpenAIEmbeddings } from "@langchain/openai"
+import { chatCompletion, generateEmbedding } from "../models"
 
 export class ModeratorAgent {
   constructor() {
     this.role = "Moderator"
-    this.model = new AzureChatOpenAI ({
-      modelName: "gpt-4o",
-      azureOpenAIApiKey: process.env.AZURE_API_KEY, // In Node.js defaults to process.env.AZURE_OPENAI_API_KEY
-      azureOpenAIApiInstanceName: process.env.AZURE_INSTANCE_NAME, // In Node.js defaults to process.env.AZURE_OPENAI_API_INSTANCE_NAME
-      azureOpenAIApiDeploymentName: 'gpt-4o', 
-      azureOpenAIApiVersion: process.env.AZURE_OPENAI_API_VERSION, 
-    })
-    this.embeddings = new AzureOpenAIEmbeddings()
     this.alpha = 0.7 // Hyperparameter for reranking
   }
 
@@ -22,12 +14,12 @@ export class ModeratorAgent {
   }
 
   async rerankUnusedInformation(unusedInfo, topic) {
-    const topicEmbedding = await this.embeddings.embedQuery(topic)
+    const topicEmbedding = await generateEmbedding(topic)
 
     const rankedInfo = await Promise.all(
       unusedInfo.map(async (info) => {
-        const infoEmbedding = await this.embeddings.embedQuery(info.content)
-        const questionEmbedding = await this.embeddings.embedQuery(info.question)
+        const infoEmbedding = await generateEmbedding(info.content)
+        const questionEmbedding = await generateEmbedding(info.question)
 
         // Calculate similarities
         const topicSimilarity = await this.calculateSimilarity(infoEmbedding, topicEmbedding)
@@ -49,7 +41,7 @@ export class ModeratorAgent {
   }
 
   async generateKnowledgeBaseSummary(topic, mindMap) {
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: "Generate a brief summary of the discussion based on the hierarchical structure.",
@@ -62,14 +54,14 @@ ${JSON.stringify(mindMap, null, 2)}`,
       },
     ])
 
-    return response.content
+    return response
   }
 
   async generateGroundedQuestion(topic, summary, information, lastUtterance) {
     // Format information with citations
     const formattedInfo = information.map((info, i) => `[${i + 1}] ${info.content}`).join("\n")
 
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: `Generate a discussion question that:
@@ -93,7 +85,7 @@ ${lastUtterance}`,
       },
     ])
 
-    return response.content
+    return response
   }
 
   async generateQuestion(topic, discourseHistory, rankedInfo) {
@@ -122,7 +114,7 @@ ${lastUtterance}`,
   async updateParticipantList(topic, discourseHistory) {
     const summary = await this.generateKnowledgeBaseSummary(topic, discourseHistory)
 
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content:
@@ -134,7 +126,7 @@ ${lastUtterance}`,
       },
     ])
 
-    return JSON.parse(response.content)
+    return JSON.parse(response)
   }
 }
 

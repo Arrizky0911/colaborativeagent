@@ -1,4 +1,5 @@
 import { AzureChatOpenAI, AzureOpenAIEmbeddings } from "@langchain/openai"
+import { chatCompletion, generateEmbedding } from "../models"
 
 export class MindMapNode {
   constructor(id, title, level = 0) {
@@ -13,21 +14,14 @@ export class MindMapNode {
 
 export class MindMapManager {
   constructor() {
-    this.model = new AzureChatOpenAI({
-      azureOpenAIApiKey: process.env.AZURE_API_KEY, // In Node.js defaults to process.env.AZURE_OPENAI_API_KEY
-      azureOpenAIApiInstanceName: process.env.AZURE_INSTANCE_NAME, // In Node.js defaults to process.env.AZURE_OPENAI_API_INSTANCE_NAME
-      azureOpenAIApiDeploymentName: 'gpt-4o', 
-      azureOpenAIApiVersion: process.env.AZURE_OPENAI_API_VERSION, // In Node.js defaults to process.env.AZURE_OPENAI_API_VERSION
-    })
-    this.embeddings = new AzureOpenAIEmbeddings()
     this.root = null
     this.K = 10 // Maximum information pieces per concept
   }
 
   async calculateSimilarity(text1, text2) {
     const [embedding1, embedding2] = await Promise.all([
-      this.embeddings.embedQuery(text1),
-      this.embeddings.embedQuery(text2),
+      generateEmbedding(text1),
+      generateEmbedding(text2),
     ])
 
     // Calculate cosine similarity
@@ -59,7 +53,7 @@ export class MindMapManager {
       .map((c, i) => `${i}. ${c.node.title} (similarity: ${c.similarity.toFixed(3)})`)
       .join("\n")
 
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: `Choose the best placement for the information based on the question and candidates.
@@ -71,12 +65,12 @@ export class MindMapManager {
       },
     ])
 
-    const match = response.content.match(/Best placement: (\d+)/)
+    const match = response.match(/Best placement: (\d+)/)
     return match ? Number.parseInt(match[1]) : null
   }
 
   async insertInformation(info, question, currentNode = this.root) {
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: `Decide how to insert the information into the knowledge base.
@@ -91,7 +85,7 @@ export class MindMapManager {
       },
     ])
 
-    const decision = response.content.trim()
+    const decision = Array.isArray(response) && response.length > 0 ? response[0].trim() : "";
 
     if (decision === "insert") {
       currentNode.information.push({ content: info, question })
@@ -121,7 +115,7 @@ export class MindMapManager {
 
   async reorganize(node) {
     // Generate subtopics based on the information
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: "Generate a list of subtopics that organize the given information pieces.",
@@ -132,7 +126,7 @@ export class MindMapManager {
       },
     ])
 
-    const subtopics = response.content.split("\n").filter(Boolean)
+    const subtopics = response.split("\n").filter(Boolean)
 
     // Create new nodes for subtopics
     const oldInformation = [...node.information]

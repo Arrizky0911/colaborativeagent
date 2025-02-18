@@ -1,5 +1,7 @@
 import { ExpertAgent, IntentType } from "../agents/expert"
+import { getAgents } from "../agents/genenerate_expert"
 import { ModeratorAgent } from "../agents/moderator"
+import { chatCompletion } from "../models"
 import { MindMapManager, MindMapNode } from "./mind-map-manager"
 
 export class DiscourseManager {
@@ -21,42 +23,43 @@ export class DiscourseManager {
   }
 
   async initializeMindMap(topic) {
-    this.mindMap.root = new MindMapNode("root", topic)
+    this.mindMap.root = new MindMapNode("root", topic);
 
-    const response = await this.moderator.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
-        content: "Generate an initial outline structure for the topic.",
+        content: `You are an expert at creating outlines. Write an outline for a deep research report regarding the given topic.
+        Use "#" for section titles, "##" for subsection titles, "###" for subsubsection titles.
+        Only include the outline structure, no other information.`,
       },
       {
         role: "user",
         content: `Topic: ${topic}`,
       },
-    ])
+    ]);
 
-    const sections = response.content.split("\n").filter(Boolean)
+    const textResponse = Array.isArray(response) ? response[0] : response;
+    const sections = textResponse.split("\n").filter(Boolean);
 
-    for (const section of sections) {
-      await this.mindMap.insertInformation("", section, this.mindMap.root)
-    }
+    console.log(sections)
+
+    // for (const section of sections) {
+    //     await this.mindMap.insertInformation("", section, this.mindMap.root);
+    // }
   }
+
 
   async generateExperts() {
     try {
-      const response = await fetch("/api/generate-experts", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ topic: this.topic }),
-      })
+        const response = await getAgents(this.topic);
 
-      if (!response.ok) {
-        throw new Error("Failed to generate experts")
-      }
+        console.log(response)
 
-      const experts = await response.json()
-      this.experts = experts.map((e) => new ExpertAgent(e.role, e.description))
+        this.experts = response.map((e) => new ExpertAgent(e.role, e.description))
+        
+
+        console.log(experts)
+        this.experts = experts.map(e => new ExpertAgent(e.role, e.description));
     } catch (error) {
       console.error("Error generating experts:", error)
       // Fallback to default experts if generation fails

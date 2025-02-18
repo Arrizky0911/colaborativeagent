@@ -1,14 +1,11 @@
-import { AzureKeyCredential, OpenAIClient } from "@azure/openai"
+import axios from 'axios';
+import { chatCompletion } from '../models';
 
-const endpoint = process.env.AZURE_OPENAI_ENDPOINT
-const azureApiKey = process.env.AZURE_OPENAI_API_KEY
-const deploymentId = process.env.AZURE_OPENAI_DEPLOYMENT_ID
+const AZURE_OPENAI_ENDPOINT = process.env.AZURE_OPENAI_API_BASE
+const AZURE_API_KEY = process.env.AZURE_API_KEY
+const API_VERSION = process.env.AZURE_OPENAI_API_VERSION
 
-const client = new OpenAIClient(endpoint, new AzureKeyCredential(azureApiKey))
-
-export async function POST(req) {
-  const { topic } = await req.json()
-
+export const getAgents = async (topic) => {
   const messages = [
     {
       role: "system",
@@ -17,19 +14,23 @@ export async function POST(req) {
       Format the output as:
       1. [speaker role]: [short description]
       2. [speaker role]: [short description]
-      Select 3-4 experts plus a moderator.`,
+      Select 3-4 experts plus a moderator. 
+      Do not use a person name as [speaker role] but only a role, for example Biologist`,
     },
     {
       role: "user",
       content: `Topic: ${topic}
-      Number of speakers needed: 4`,
+      Number of speakers needed: 3`,
     },
   ]
 
   try {
-    const response = await client.getChatCompletions(deploymentId, messages)
-    const expertsText = response.choices[0].message?.content || ""
+    // const response = await client.getChatCompletions(deploymentId, messages)
+    const response = await chatCompletion(messages);
+    
+    const expertsText = Array.isArray(response) ? response[0] : response;
 
+    console.log(experts)
     // Parse the experts text into structured data
     const experts = expertsText
       .split("\n")
@@ -38,6 +39,10 @@ export async function POST(req) {
         const [role, description] = line.substring(3).split(": ")
         return { role: role.trim(), description: description.trim() }
       })
+
+    // console.log(experts)
+
+
 
     return Response.json(experts)
   } catch (error) {

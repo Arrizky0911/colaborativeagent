@@ -1,5 +1,5 @@
 import { TavilySearchResults } from "@langchain/community/tools/tavily_search"
-import { AzureChatOpenAI  } from "@langchain/openai"
+import { chatCompletion } from "../models"
 
 export const IntentType = {
   ORIGINAL_QUESTION: "ORIGINAL_QUESTION",
@@ -12,19 +12,13 @@ export class ExpertAgent {
   constructor(role, description) {
     this.role = role
     this.description = description
-    this.model = new AzureChatOpenAI ({
-      azureOpenAIApiKey: process.env.AZURE_API_KEY, // In Node.js defaults to process.env.AZURE_OPENAI_API_KEY
-      azureOpenAIApiInstanceName: process.env.AZURE_INSTANCE_NAME, // In Node.js defaults to process.env.AZURE_OPENAI_API_INSTANCE_NAME
-      azureOpenAIApiDeploymentName: 'gpt-4o', 
-      azureOpenAIApiVersion: process.env.AZURE_OPENAI_API_VERSION, 
-    })
     this.searchTool = new TavilySearchResults({
       apiKey: process.env.TAVILY_API_KEY,
     })
   }
 
   async chooseIntent(discourseHistory) {
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: `You are ${this.role}. Based on the discourse history, choose an intent type from: 
@@ -36,11 +30,11 @@ export class ExpertAgent {
         content: `Discourse history:\n${discourseHistory.join("\n")}\n\nChoose intent:`,
       },
     ])
-    return response.content
+    return response
   }
 
   async generateQueries(topic, question) {
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: `Generate search queries to answer the question or support a claim.
@@ -51,11 +45,11 @@ export class ExpertAgent {
         content: `Topic: ${topic}\nQuestion: ${question}`,
       },
     ])
-    return response.content.split("\n").map((q) => q.replace("- ", "").trim())
+    return response.split("\n").map((q) => q.replace("- ", "").trim())
   }
 
   async generateAnswer(topic, question, information) {
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: `You are ${this.role}. Generate an informative response using the provided information.
@@ -66,11 +60,11 @@ export class ExpertAgent {
         content: `Topic: ${topic}\nQuestion: ${question}\nInformation:\n${information}`,
       },
     ])
-    return response.content
+    return response
   }
 
   async polishUtterance(content, previousUtterance) {
-    const response = await this.model.invoke([
+    const response = await chatCompletion([
       {
         role: "system",
         content: `As ${this.role}, make this response more conversational and engaging.
@@ -81,7 +75,7 @@ export class ExpertAgent {
         content: `Previous utterance: ${previousUtterance}\nContent to polish: ${content}`,
       },
     ])
-    return response.content
+    return response
   }
 
   async generateUtterance(topic, discourseHistory) {
@@ -100,7 +94,7 @@ export class ExpertAgent {
 
       content = await this.generateAnswer(topic, lastQuestion, JSON.stringify(searchResults))
     } else {
-      content = await this.model.invoke([
+      content = await chatCompletion([
         {
           role: "system",
           content: `As ${this.role}, generate a relevant question based on the discourse history.`,
@@ -110,7 +104,7 @@ export class ExpertAgent {
           content: `Discourse history:\n${discourseHistory.join("\n")}`,
         },
       ])
-      content = content.content
+      content = content
     }
 
     const previousUtterance = discourseHistory[discourseHistory.length - 1] || ""
