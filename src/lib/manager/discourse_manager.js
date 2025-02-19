@@ -1,5 +1,5 @@
-import { ExpertAgent, IntentType } from "../agents/expert"
-import { getAgents } from "../agents/genenerate_expert"
+import { ExpertAgent } from "../agents/expert"
+import { getAgents } from "../agents/generate_expert"
 import { ModeratorAgent } from "../agents/moderator"
 import { chatCompletion } from "../models"
 import { MindMapManager, MindMapNode } from "./mind-map-manager"
@@ -7,181 +7,373 @@ import { MindMapManager, MindMapNode } from "./mind-map-manager"
 export class DiscourseManager {
   constructor(topic) {
     this.topic = topic
-    this.moderator = new ModeratorAgent()
-    this.discourseHistory = []
-    this.unusedInformation = []
-    this.currentExpertIndex = 0
-    this.consecutiveAnswerTurns = 0
-    this.L = 2
-    this.mindMap = new MindMapManager()
-    this.lastModeratorTurn = 0
+    this.expertAgent = new ExpertAgent()
+    this.moderatorAgent = new ModeratorAgent()
+    this.mindMap = {
+      initialize: () => {
+        return {
+          id: 'root',
+          topic: this.topic,
+          children: []
+        }
+      },
+      addNode: (parentId, content) => {
+        // Implementasi logika untuk menambah node
+      },
+      getMindMap: () => {
+        return this.mindMapData
+      },
+      getStructure: () => {
+        return {
+          nodes: this.mindMapData,
+          history: this.discussionHistory
+        }
+      }
+    }
+    this.mindMapData = null
+    this.experts = []
+    this.discussionHistory = []
   }
 
   async initialize() {
-    await this.initializeMindMap(this.topic)
-    await this.generateExperts()
-  }
-
-  async initializeMindMap(topic) {
-    this.mindMap.root = new MindMapNode("root", topic);
-
-    const response = await chatCompletion([
-      {
-        role: "system",
-        content: `You are an expert at creating outlines. Write an outline for a deep research report regarding the given topic.
-        Use "#" for section titles, "##" for subsection titles, "###" for subsubsection titles.
-        Only include the outline structure, no other information.`,
-      },
-      {
-        role: "user",
-        content: `Topic: ${topic}`,
-      },
-    ]);
-
-    const textResponse = Array.isArray(response) ? response[0] : response;
-    const sections = textResponse.split("\n").filter(Boolean);
-
-    console.log(sections)
-
-    // for (const section of sections) {
-    //     await this.mindMap.insertInformation("", section, this.mindMap.root);
-    // }
-  }
-
-
-  async generateExperts() {
     try {
-        const response = await getAgents(this.topic);
-
-        console.log(response)
-
-        this.experts = response.map((e) => new ExpertAgent(e.role, e.description))
-        
-
-        console.log(experts)
-        this.experts = experts.map(e => new ExpertAgent(e.role, e.description));
+      // Initialize experts
+      this.experts = await this.expertAgent.generateExperts(this.topic)
+      
+      // Initialize mind map
+      this.mindMapData = this.mindMap.initialize()
+      
+      return true
     } catch (error) {
-      console.error("Error generating experts:", error)
-      // Fallback to default experts if generation fails
-      this.experts = [
-        new ExpertAgent("AI Expert", "Specialist in artificial intelligence and machine learning"),
-        new ExpertAgent("Domain Expert", "Specialist in the topic area"),
-        new ExpertAgent("Critic", "Provides critical analysis and alternative viewpoints"),
-      ]
+      console.error("Error initializing DiscourseManager:", error)
+      throw error
     }
   }
 
   async handleUserInput(input) {
-    this.discourseHistory.push({
-      role: "user",
-      content: input,
-      timestamp: new Date().toISOString(),
+    // Add user input to history
+    this.discussionHistory.push({
+      role: 'user',
+      content: input
     })
 
-    // Update experts based on user input
-    const updatedExperts = await this.moderator.updateParticipantList(this.topic, this.discourseHistory)
-    this.experts = updatedExperts.map((e) => new ExpertAgent(e.role, e.description))
+    // Get background information first
+    const backgroundInfo = await chatCompletion([
+      {
+        role: "system",
+        content: "Provide brief background information about this topic and question. Keep it concise and informative."
+      },
+      {
+        role: "user",
+        content: `Topic: ${this.topic}\nQuestion: ${input}`
+      }
+    ])
 
-    // Reset consecutive answer counter
-    this.consecutiveAnswerTurns = 0
-  }
+    // Add background to history
+    this.discussionHistory.push({
+      role: 'background',
+      content: backgroundInfo
+    })
 
-  async generateNextUtterance() {
-    // Check if moderator should intervene
-    if (this.consecutiveAnswerTurns >= this.L) {
-      const rankedInfo = await this.moderator.rerankUnusedInformation(this.unusedInformation, this.topic)
-      const moderatorUtterance = await this.moderator.generateQuestion(this.topic, this.discourseHistory, rankedInfo)
-      this.discourseHistory.push(moderatorUtterance)
-      this.consecutiveAnswerTurns = 0
-      return moderatorUtterance
-    }
-
-    // Get next expert in sequence
-    const expert = this.experts[this.currentExpertIndex]
-    this.currentExpertIndex = (this.currentExpertIndex + 1) % this.experts.length
-
-    // Generate expert utterance
-    const utterance = await expert.generateUtterance(
+    // Get moderator's initial thoughts
+    const moderatorThoughts = await this.moderatorAgent.generateIntervention(
       this.topic,
-      this.discourseHistory.map((u) => u.content),
+      this.discussionHistory
     )
 
-    // Update consecutive answer counter
-    if (utterance.intent === IntentType.POTENTIAL_ANSWER || utterance.intent === IntentType.FURTHER_DETAILS) {
-      this.consecutiveAnswerTurns++
-    } else {
-      this.consecutiveAnswerTurns = 0
+    // Add moderator response to history
+    this.discussionHistory.push({
+      role: 'moderator',
+      content: moderatorThoughts
+    })
+
+    // Get responses from each expert
+    const expertResponses = await Promise.all(
+      this.experts.map(expert => 
+        this.expertAgent.generateResponse(this.topic, input, expert.role)
+      )
+    )
+
+    // Add expert responses to history
+    expertResponses.forEach((response, index) => {
+      this.discussionHistory.push({
+        role: 'expert',
+        expert: this.experts[index],
+        content: response.content,
+        citations: response.citations
+      })
+
+      if (response.content) {
+        this.mindMapData.children.push({
+          id: `node-${Date.now()}-${index}`,
+          topic: response.content.substring(0, 50) + '...',
+          children: []
+        })
+      }
+    })
+
+    // Generate new article after adding responses
+    const newArticle = await this.generateArticle();
+
+    return {
+      background: backgroundInfo,
+      moderator: moderatorThoughts,
+      experts: expertResponses,
+      article: newArticle // Add article to response
     }
-
-    await this.handleUtterance(utterance) // Handle the generated utterance
-
-    return utterance
   }
 
-  async handleUtterance(utterance) {
-    this.discourseHistory.push(utterance)
+  async moderatorIntervention() {
+    const moderatorResponse = await this.moderatorAgent.generateIntervention(
+      this.topic,
+      this.discussionHistory,
+      this.mindMap.getStructure()
+    )
 
-    // If this is an answer with retrieved information
-    if (utterance.intent === IntentType.POTENTIAL_ANSWER || utterance.intent === IntentType.FURTHER_DETAILS) {
-      // Store unused information
-      if (utterance.retrievedInfo) {
-        const usedCitations = (utterance.content.match(/\[\d+\]/g) || []).map((c) => Number.parseInt(c.slice(1, -1)))
+    this.discussionHistory.push({
+      role: 'moderator',
+      content: moderatorResponse
+    })
 
-        const unused = utterance.retrievedInfo.filter((_, i) => !usedCitations.includes(i + 1))
+    return moderatorResponse
+  }
 
-        this.unusedInformation.push(
-          ...unused.map((info) => ({
-            content: info,
-            question: this.findRelatedQuestion(utterance),
-          })),
+  async generateArticle() {
+    try {
+      const allCitations = this.discussionHistory
+        .filter(msg => msg.role === 'expert' && msg.citations)
+        .flatMap(msg => msg.citations)
+        .filter((citation, index, self) => 
+          index === self.findIndex(c => c.url === citation.url)
         )
+        .slice(0, 10)
+        .map((citation, index) => ({
+          ...citation,
+          id: (index + 1).toString()
+        }));
+
+      const response = await chatCompletion([
+        {
+          role: "system",
+          content: `Create a concise article as JSON.
+          IMPORTANT: Return ONLY valid JSON with this EXACT structure, no markdown:
+          {
+            "title": "Title",
+            "sections": [{"title": "Section", "content": "Content"}],
+            "citations": []
+          }`
+        },
+        {
+          role: "user", 
+          content: `Topic: ${this.topic}
+          History: ${JSON.stringify(this.discussionHistory
+            .map(msg => ({
+              role: msg.role,
+              content: msg.content?.substring(0, 300)
+            }))
+            .slice(-5)
+          )}`
+        }
+      ]);
+
+      // Bersihkan response dengan lebih ketat
+      const cleanedResponse = response
+        .replace(/```json\s*|\s*```/g, '')
+        .replace(/\n\s*/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      try {
+        const article = JSON.parse(cleanedResponse);
+        article.citations = allCitations;
+        
+        if (!article.title || !Array.isArray(article.sections)) {
+          throw new Error('Invalid article structure');
+        }
+        
+        return article;
+      } catch (parseError) {
+        console.error("Article parsing error:", parseError);
+        console.log("Raw response:", response);
+        return this.getFallbackArticle();
       }
-
-      // Update mind map
-      const questionUtterance = this.findRelatedQuestion(utterance)
-      if (questionUtterance) {
-        await this.mindMap.insertInformation(utterance.content, questionUtterance.content, this.mindMap.root)
-      }
+    } catch (error) {
+      console.error("Error generating article:", error);
+      return this.getFallbackArticle();
     }
-
-    // Check if moderator should intervene
-    if (this.shouldModeratorIntervene()) {
-      const rankedInfo = await this.moderator.rerankUnusedInformation(this.unusedInformation, this.topic)
-
-      const moderatorUtterance = await this.moderator.generateQuestion(this.topic, this.discourseHistory, rankedInfo)
-
-      // Update expert panel based on new direction
-      const updatedExperts = await this.moderator.updateParticipantList(this.topic, this.discourseHistory)
-      this.experts = updatedExperts.map((e) => new ExpertAgent(e.role, e.description))
-
-      this.discourseHistory.push(moderatorUtterance)
-      this.lastModeratorTurn = this.discourseHistory.length
-      this.consecutiveAnswerTurns = 0
-      this.unusedInformation = [] // Clear unused information after moderator turn
-
-      return moderatorUtterance
-    }
-
-    return this.mindMap.toUIFormat()
   }
 
-  findRelatedQuestion(utterance) {
-    return this.discourseHistory
-      .slice(0, this.discourseHistory.indexOf(utterance))
-      .reverse()
-      .find((u) => u.intent === IntentType.ORIGINAL_QUESTION || u.intent === IntentType.INFORMATION_REQUEST)
+  getFallbackArticle() {
+    return {
+      title: this.topic,
+      sections: [
+        {
+          title: "Overview",
+          content: "An error occurred while generating the article content."
+        }
+      ],
+      citations: []
+    };
   }
 
-  shouldModeratorIntervene() {
-    // Intervene if:
-    // 1. Too many consecutive answer turns
-    // 2. Enough unused information has accumulated
-    // 3. It's been a while since last moderator turn
-    return (
-      this.consecutiveAnswerTurns >= this.L ||
-      this.unusedInformation.length >= 5 ||
-      this.discourseHistory.length - this.lastModeratorTurn >= 10
-    )
+  getMindMap() {
+    return this.mindMapData
+  }
+
+  async generateBackgroundDiscussion() {
+    try {
+      // Get initial background from moderator
+      const moderatorIntro = await this.moderatorAgent.generateIntroduction(this.topic)
+      
+      this.discussionHistory.push({
+        role: 'moderator',
+        content: moderatorIntro,
+        isBackground: true
+      })
+
+      // Generate initial expert responses
+      const expertResponses = await Promise.all(
+        this.experts.map(expert => 
+          this.expertAgent.generateResponse(this.topic, moderatorIntro, expert.role)
+        )
+      )
+
+      // Add expert responses to history
+      expertResponses.forEach((response, index) => {
+        this.discussionHistory.push({
+          role: 'expert',
+          expert: this.experts[index],
+          content: response.content,
+          citations: response.citations,
+          isBackground: true
+        })
+      })
+
+      // Continue discussion until completion
+      let discussionComplete = false
+      let iterations = 0
+      const MAX_ITERATIONS = 3
+
+      while (!discussionComplete && iterations < MAX_ITERATIONS) {
+        // Get moderator's next question/insight
+        const moderatorResponse = await this.moderatorAgent.generateNextQuestion(
+          this.topic,
+          this.discussionHistory
+        )
+
+        this.discussionHistory.push({
+          role: 'moderator',
+          content: moderatorResponse,
+          isBackground: true
+        })
+
+        // Get expert responses
+        const responses = await Promise.all(
+          this.experts.map(expert =>
+            this.expertAgent.generateResponse(this.topic, moderatorResponse, expert.role)
+          )
+        )
+
+        responses.forEach((response, index) => {
+          this.discussionHistory.push({
+            role: 'expert',
+            expert: this.experts[index],
+            content: response.content,
+            citations: response.citations,
+            isBackground: true
+          })
+        })
+
+        // Check if discussion is complete
+        discussionComplete = await this.moderatorAgent.checkDiscussionComplete(
+          this.discussionHistory
+        )
+        iterations++
+      }
+
+      // Generate mind map from discussion
+      this.mindMapData = await this.generateMindMap()
+
+      return {
+        history: this.discussionHistory.filter(msg => msg.isBackground),
+        mindMap: this.mindMapData
+      }
+    } catch (error) {
+      console.error("Error generating background discussion:", error)
+      throw error
+    }
+  }
+
+  async generateMindMap() {
+    try {
+      const response = await chatCompletion([
+        {
+          role: "system",
+          content: `Generate a mind map structure as JSON.
+          IMPORTANT: Return ONLY valid JSON with this exact structure:
+          {
+            "id": "root",
+            "topic": "Main Topic",
+            "children": [
+              {
+                "id": "child-1",
+                "topic": "Subtopic",
+                "children": []
+              }
+            ]
+          }`
+        },
+        {
+          role: "user",
+          content: `Topic: ${this.topic}
+          Discussion points: ${JSON.stringify(this.discussionHistory
+            .slice(-5)
+            .map(h => ({ 
+              role: h.role,
+              content: h.content?.substring(0, 200) // Batasi panjang konten
+            })))}`
+        }
+      ]);
+
+      // Bersihkan response
+      const cleanedResponse = response.trim()
+        .replace(/^```json\s*|\s*```$/g, '')
+        .replace(/\n\s*/g, ' ')
+        .trim();
+
+      try {
+        const mindMap = JSON.parse(cleanedResponse);
+        
+        // Validasi struktur
+        if (!mindMap.id || !mindMap.topic || !Array.isArray(mindMap.children)) {
+          throw new Error('Invalid mind map structure');
+        }
+
+        // Pastikan semua node memiliki struktur yang valid
+        const validateNode = (node) => {
+          if (!node.id || !node.topic || !Array.isArray(node.children)) {
+            throw new Error('Invalid node structure');
+          }
+          node.children.forEach(validateNode);
+        };
+        validateNode(mindMap);
+
+        return mindMap;
+      } catch (parseError) {
+        console.error("Mind map parsing error:", parseError, "Response:", response);
+        return this.getFallbackMindMap();
+      }
+    } catch (error) {
+      console.error("Error generating mind map:", error);
+      return this.getFallbackMindMap();
+    }
+  }
+
+  getFallbackMindMap() {
+    return {
+      id: "root",
+      topic: this.topic,
+      children: []
+    };
   }
 }
-

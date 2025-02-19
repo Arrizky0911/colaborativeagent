@@ -128,5 +128,73 @@ ${lastUtterance}`,
 
     return JSON.parse(response)
   }
+
+  async generateIntervention(topic, discussionHistory) {
+    const response = await chatCompletion([
+      {
+        role: "system",
+        content: `You are a skilled moderator guiding a discussion about ${topic}.
+        Review the discussion history and provide thoughtful questions or insights to guide the conversation.
+        Focus on:
+        - Highlighting key points
+        - Identifying gaps in the discussion
+        - Encouraging deeper exploration of important aspects
+        Use a professional but engaging tone.`
+      },
+      {
+        role: "user",
+        content: `Topic: ${topic}
+Discussion history: ${JSON.stringify(discussionHistory, null, 2)}`
+      }
+    ])
+
+    return response
+  }
+
+  async generateIntroduction(topic) {
+    const response = await chatCompletion([
+      {
+        role: "system",
+        content: `You are a skilled moderator starting a discussion about ${topic}.
+        Generate an engaging introduction and initial question to start the discussion.
+        Focus on core aspects that need to be explored.`
+      },
+      {
+        role: "user", 
+        content: `Topic: ${topic}`
+      }
+    ])
+    return response
+  }
+
+  async generateNextQuestion(topic, history) {
+    const response = await chatCompletion([
+      {
+        role: "system",
+        content: `Based on the discussion history, generate the next question or point to explore.
+        Ensure progression and depth in the discussion.`
+      },
+      {
+        role: "user",
+        content: `Topic: ${topic}\nHistory: ${JSON.stringify(history)}`
+      }
+    ])
+    return response
+  }
+
+  async checkDiscussionComplete(history) {
+    const response = await chatCompletion([
+      {
+        role: "system",
+        content: `Evaluate if the background discussion has covered the essential aspects of the topic.
+        Return "complete" or "incomplete" based on coverage and depth.`
+      },
+      {
+        role: "user",
+        content: `Discussion history: ${JSON.stringify(history)}`
+      }
+    ])
+    return response.toLowerCase().includes("complete")
+  }
 }
 
