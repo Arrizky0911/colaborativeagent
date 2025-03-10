@@ -10,36 +10,22 @@ export const IntentType = {
 
 export class ExpertAgent {
   constructor() {
-    this.searchTool = {
-      search: async (topic, question) => {
-        // Batasi panjang topic dan question sebelum digabung
-        const truncatedTopic = topic.substring(0, 150);
-        const truncatedQuestion = question.substring(0, 150);
-        const query = `${truncatedTopic}: ${truncatedQuestion}`;
-        
-        const results = await searchTavily(query)
-        
-        return results
-          .filter(result => result.score > 0.7)
-          .slice(0, 5)
-          .map((result, index) => ({
-            id: index + 1,
-            title: result.title,
-            content: result.content.substring(0, 300) + "...",
-            url: result.url
-          }))
-      }
-    }
+    this.role = "Expert"
   }
 
   async generateExperts(topic) {
     const response = await chatCompletion([
       {
         role: "system",
-        content: `You are an expert at generating expert panels.
-        Generate 3-4 relevant expert roles for the topic: "${topic}".
-        Return ONLY a valid JSON array with this exact format:
-        [{"role":"Expert Title","description":"Brief description"}]`
+        content: `Generate 3-4 relevant expert roles for the given topic.
+        Each expert should have complementary expertise to facilitate comprehensive discussion.
+        Format output as JSON array:
+        [
+          {
+            "role": "Expert Title",
+            "description": "Brief description of expertise"
+          }
+        ]`
       },
       {
         role: "user",
@@ -47,78 +33,31 @@ export class ExpertAgent {
       }
     ]);
 
-    try {
-      // Bersihkan response dari karakter yang bisa merusak JSON
-      const cleanResponse = response.trim().replace(/[\r\n\t]/g, '');
-      return JSON.parse(cleanResponse);
-    } catch (error) {
-      console.error("Error parsing expert response:", error);
-      // Fallback experts jika parsing gagal
-      return [
-        {
-          role: "General Expert",
-          description: "Expert in the general topic area"
-        }
-      ];
-    }
+    return JSON.parse(response);
   }
 
-  async generateResponse(topic, question, role) {
-    try {
-      const searchResults = await this.searchTool.search(topic, question)
-      
-      const numberedResults = searchResults.map((result, index) => ({
-        ...result,
-        id: index + 1
-      }))
-
-      const response = await chatCompletion([
-        {
-          role: "system",
-          content: `You are an expert ${role}.
-          IMPORTANT INSTRUCTIONS:
-          1. Use [n] citations for EVERY statement you make
-          2. Each citation should be in format [n] where n is the source number
-          3. Make sure to use multiple sources to support your claims
-          4. Write in a formal academic style
-          5. If information is not directly supported by sources, start with "Based on available information..."
-          6. Structure your response in clear paragraphs
-          7. EVERY paragraph must have at least one citation
-          8. Citations should be clickable numbers in [n] format`
-        },
-        {
-          role: "user",
-          content: `Topic: ${topic}
-          Question: ${question}
-          Available Sources:
-          ${numberedResults.map(r => `[${r.id}] ${r.title}\n${r.content}\nURL: ${r.url}`).join('\n\n')}`
-        }
-      ])
-
-      // Extract citations
-      const citations = []
-      const citationRegex = /\[(\d+)\]/g
-      let match
-      
-      while ((match = citationRegex.exec(response)) !== null) {
-        const citationId = match[1]
-        const source = numberedResults.find(r => r.id === parseInt(citationId))
-        if (source && !citations.some(c => c.id === citationId)) {
-          citations.push({
-            id: citationId,
-            title: source.title,
-            url: source.url
-          })
-        }
+  async generateResponse(topic, question, expertRole) {
+    const response = await chatCompletion([
+      {
+        role: "system",
+        content: `You are an expert ${expertRole}.
+        Generate a detailed, informative response about ${topic} related to the given question.
+        Use your expertise to provide insights and analysis.
+        Format:
+        - Clear, structured paragraphs
+        - Professional academic tone
+        - Include theoretical and practical perspectives
+        - Draw from your domain knowledge`
+      },
+      {
+        role: "user",
+        content: `Topic: ${topic}\nQuestion: ${question}`
       }
+    ]);
 
-      return {
-        content: response,
-        citations: citations.sort((a, b) => parseInt(a.id) - parseInt(b.id))
-      }
-    } catch (error) {
-      console.error("Error in generateResponse:", error)
-      throw error
+    return {
+      content: response,
+      citations: [] // Kosong karena tidak menggunakan search
     }
   }
 

@@ -171,7 +171,6 @@ export class DiscourseManager {
               role: msg.role,
               content: msg.content?.substring(0, 300)
             }))
-            .slice(-5)
           )}`
         }
       ]);
